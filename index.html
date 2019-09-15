@@ -62,6 +62,393 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-heap_check" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/09/15/heap_check/" class="article-date">
+  <time datetime="2019-09-15T06:34:24.785Z" itemprop="datePublished">2019-09-15</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2019/09/15/heap_check/">heap_check</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="free-invalid-next-size-fast"><a href="#free-invalid-next-size-fast" class="headerlink" title="free(): invalid next size (fast)"></a>free(): invalid next size (fast)</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">*** Error in `./level6&apos;: free(): invalid next size (fast): 0x000055dfcd4e2030 ***</span><br></pre></td></tr></table></figure>
+
+<p>在free一个修改过size大小的chunk时报错。</p>
+<p>对应源码：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">4203</span>     <span class="keyword">if</span> (__builtin_expect (chunksize_nomask (chunk_at_offset (p, size))</span><br><span class="line"><span class="number">4204</span>                           &lt;= <span class="number">2</span> * SIZE_SZ, <span class="number">0</span>)</span><br><span class="line"><span class="number">4205</span>         || __builtin_expect (chunksize (chunk_at_offset (p, size))</span><br><span class="line">4206                              &gt;= av-&gt;system_mem, 0))</span><br><span class="line"><span class="number">4207</span>       &#123;</span><br><span class="line"><span class="number">4208</span>         /* We might <span class="keyword">not</span> have a lock at this point <span class="keyword">and</span> concurrent modifications</span><br><span class="line"><span class="number">4209</span>            of system_mem might have let to a false positive.  Redo the test</span><br><span class="line"><span class="number">4210</span>            after getting the lock.  */</span><br><span class="line"><span class="number">4211</span>         <span class="keyword">if</span> (have_lock</span><br><span class="line"><span class="number">4212</span>             || (&#123; <span class="keyword">assert</span> (locked == <span class="number">0</span>);</span><br><span class="line">4213                   __libc_lock_lock (av-&gt;mutex);</span><br><span class="line"><span class="number">4214</span>                   locked = <span class="number">1</span>;</span><br><span class="line"><span class="number">4215</span>                   chunksize_nomask (chunk_at_offset (p, size)) &lt;= <span class="number">2</span> * SIZE_SZ</span><br><span class="line">4216                     || chunksize (chunk_at_offset (p, size)) &gt;= av-&gt;system_mem;</span><br><span class="line"><span class="number">4217</span>               &#125;))</span><br><span class="line"><span class="number">4218</span>           &#123;</span><br><span class="line"><span class="number">4219</span>             errstr = <span class="string">"free(): invalid next size (fast)"</span>;</span><br><span class="line"><span class="number">4220</span>             goto errout;</span><br><span class="line"><span class="number">4221</span>           &#125;</span><br><span class="line"><span class="number">4222</span>         <span class="keyword">if</span> (! have_lock)</span><br><span class="line"><span class="number">4223</span>           &#123;</span><br><span class="line">4224             __libc_lock_unlock (av-&gt;mutex);</span><br><span class="line"><span class="number">4225</span>             locked = <span class="number">0</span>;</span><br><span class="line"><span class="number">4226</span>           &#125;</span><br><span class="line"><span class="number">4227</span>       &#125;</span><br></pre></td></tr></table></figure>
+
+<p>主要检查2个东西，</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">chunksize_nomask (chunk_at_offset (p, size)) &lt;= <span class="number">2</span> * SIZE_SZ</span><br><span class="line">chunksize (chunk_at_offset (p, size)) &gt;= av-&gt;system_mem</span><br></pre></td></tr></table></figure>
+
+<p>他们对应的宏定义是</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">1067</span> <span class="class"><span class="keyword">struct</span> <span class="title">malloc_chunk</span> &#123;</span></span><br><span class="line"><span class="number">1068</span> </span><br><span class="line"><span class="number">1069</span>   INTERNAL_SIZE_T      mchunk_prev_size;  <span class="comment">/* Size of previous chunk (if free).  */</span></span><br><span class="line"><span class="number">1070</span>   INTERNAL_SIZE_T      mchunk_size;       <span class="comment">/* Size in bytes, including overhead. */</span></span><br><span class="line"><span class="number">1071</span> </span><br><span class="line"><span class="number">1072</span>   <span class="class"><span class="keyword">struct</span> <span class="title">malloc_chunk</span>* <span class="title">fd</span>;</span>         <span class="comment">/* double links -- used only if free. */</span></span><br><span class="line"><span class="number">1073</span>   <span class="class"><span class="keyword">struct</span> <span class="title">malloc_chunk</span>* <span class="title">bk</span>;</span></span><br><span class="line"><span class="number">1074</span> </span><br><span class="line"><span class="number">1075</span>   <span class="comment">/* Only used for large blocks: pointer to next larger size.  */</span></span><br><span class="line"><span class="number">1076</span>   <span class="class"><span class="keyword">struct</span> <span class="title">malloc_chunk</span>* <span class="title">fd_nextsize</span>;</span> <span class="comment">/* double links -- used only if free. */</span></span><br><span class="line"><span class="number">1077</span>   <span class="class"><span class="keyword">struct</span> <span class="title">malloc_chunk</span>* <span class="title">bk_nextsize</span>;</span></span><br><span class="line"><span class="number">1078</span> &#125;;</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> chunk_at_offset(p, s)  ((mchunkptr) (((char *) (p)) + (s)))</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> chunksize_nomask(p)         ((p)-&gt;mchunk_size)</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> chunksize(p) (chunksize_nomask (p) &amp; ~(SIZE_BITS))</span></span><br></pre></td></tr></table></figure>
+
+<p>即将堆p的地址与size相加，得到后面一块堆块的地址，然后再得到他的size大小，这个值与2*SIZE_SZ和av-&gt;system_mem,这个av-&gt;system_mem我猜是最大size有关系，只要不是很大，就不用担心。</p>
+<p>所以我们修改掉一个chunk的size后， 想要free时，要将对应(((char *) (p)) + (s)) 的位置的size也改成一个合适值。比如0x50。否则就会报错。</p>
+<h3 id="unlink检查机制"><a href="#unlink检查机制" class="headerlink" title="unlink检查机制"></a>unlink检查机制</h3><p>源码中的unlink函数：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">1404</span> <span class="meta">#<span class="meta-keyword">define</span> unlink(AV, P, BK, FD) &#123;                                            \</span></span><br><span class="line"><span class="number">1405</span>     <span class="keyword">if</span> (__builtin_expect (chunksize(P) != prev_size (next_chunk(P)), <span class="number">0</span>))      \</span><br><span class="line"><span class="number">1406</span>       malloc_printerr (check_action, <span class="string">"corrupted size vs. prev_size"</span>, P, AV);  \</span><br><span class="line"><span class="number">1407</span>     FD = P-&gt;fd;                                                               \</span><br><span class="line"><span class="number">1408</span>     BK = P-&gt;bk;                                                               \</span><br><span class="line"><span class="number">1409</span>     <span class="keyword">if</span> (__builtin_expect (FD-&gt;bk != P || BK-&gt;fd != P, <span class="number">0</span>))                     \</span><br><span class="line"><span class="number">1410</span>       malloc_printerr (check_action, <span class="string">"corrupted double-linked list"</span>, P, AV);  \</span><br><span class="line"><span class="number">1411</span>     <span class="keyword">else</span> &#123;                                                                    \</span><br><span class="line"><span class="number">1412</span>         FD-&gt;bk = BK;                                                          \</span><br><span class="line"><span class="number">1413</span>         BK-&gt;fd = FD;                                                          \</span><br><span class="line"><span class="number">1414</span>         <span class="keyword">if</span> (!in_smallbin_range (chunksize_nomask (P))                         \</span><br><span class="line"><span class="number">1415</span>             &amp;&amp; __builtin_expect (P-&gt;fd_nextsize != <span class="literal">NULL</span>, <span class="number">0</span>)) &#123;                \</span><br><span class="line"><span class="number">1416</span>             <span class="keyword">if</span> (__builtin_expect (P-&gt;fd_nextsize-&gt;bk_nextsize != P, <span class="number">0</span>)        \</span><br><span class="line"><span class="number">1417</span>                 || __builtin_expect (P-&gt;bk_nextsize-&gt;fd_nextsize != P, <span class="number">0</span>))    \</span><br><span class="line"><span class="number">1418</span>               malloc_printerr (check_action,                                  \</span><br><span class="line"><span class="number">1419</span>                                <span class="string">"corrupted double-linked list (not small)"</span>,    \</span><br><span class="line"><span class="number">1420</span>                                P, AV);                                        \</span><br><span class="line"><span class="number">1421</span>             <span class="keyword">if</span> (FD-&gt;fd_nextsize == <span class="literal">NULL</span>) &#123;                                    \</span><br><span class="line"><span class="number">1422</span>                 <span class="keyword">if</span> (P-&gt;fd_nextsize == P)                                      \</span><br><span class="line"><span class="number">1423</span>                   FD-&gt;fd_nextsize = FD-&gt;bk_nextsize = FD;                     \</span><br><span class="line"><span class="number">1424</span>                 <span class="keyword">else</span> &#123;                                                        \</span><br><span class="line"><span class="number">1425</span>                     FD-&gt;fd_nextsize = P-&gt;fd_nextsize;                         \</span><br><span class="line"><span class="number">1426</span>                     FD-&gt;bk_nextsize = P-&gt;bk_nextsize;                         \</span><br><span class="line"><span class="number">1427</span>                     P-&gt;fd_nextsize-&gt;bk_nextsize = FD;                         \</span><br><span class="line"><span class="number">1428</span>                     P-&gt;bk_nextsize-&gt;fd_nextsize = FD;                         \</span><br><span class="line"><span class="number">1429</span>                   &#125;                                                           \</span><br><span class="line"><span class="number">1430</span>               &#125; <span class="keyword">else</span> &#123;                                                        \</span><br><span class="line"><span class="number">1431</span>                 P-&gt;fd_nextsize-&gt;bk_nextsize = P-&gt;bk_nextsize;                 \</span><br><span class="line"><span class="number">1432</span>                 P-&gt;bk_nextsize-&gt;fd_nextsize = P-&gt;fd_nextsize;                 \</span><br><span class="line"><span class="number">1433</span>               &#125;                                                               \</span><br><span class="line"><span class="number">1434</span>           &#125;                                                                   \</span><br><span class="line"><span class="number">1435</span>       &#125;                                                                       \</span><br><span class="line"><span class="number">1436</span> &#125;</span><br></pre></td></tr></table></figure>
+
+<h5 id="第一个检查："><a href="#第一个检查：" class="headerlink" title="第一个检查："></a>第一个检查：</h5><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">__builtin_expect (chunksize(P) != prev_size (next_chunk(P)), <span class="number">0</span>)</span><br></pre></td></tr></table></figure>
+
+<p>P堆块的size要等于 *(p+size)-&gt;prev_size</p>
+<h5 id="第二个检查："><a href="#第二个检查：" class="headerlink" title="第二个检查："></a>第二个检查：</h5><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">__builtin_expect (FD-&gt;bk != P || BK-&gt;fd != P, <span class="number">0</span>)</span><br></pre></td></tr></table></figure>
+
+<p>P-&gt;fd-&gt;bk =P , P-&gt;bk-&gt;fd = P</p>
+<p>正常情况下肯定是满足的，但是如果我们要伪造fd和bk，就要考虑fake_fd的bk域的值和fake_bk的fd的值。</p>
+<p>经过这2个检查，就进行了这一步操作:</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">FD-&gt;bk = BK;                                                          \</span><br><span class="line">BK-&gt;fd = FD;</span><br></pre></td></tr></table></figure>
+
+<p>(64位)如果fake_fd的值是&amp;P - 0x18,fake_bk的值是&amp;P -0x10,那么最后 BK-fd即 *(&amp;P) = &amp;P - 0x18。</p>
+<h5 id="最后一个检查"><a href="#最后一个检查" class="headerlink" title="最后一个检查:"></a>最后一个检查:</h5><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (!in_smallbin_range (chunksize_nomask (P))&amp;&amp;__builtin_expect (P-&gt;fd_nextsize != <span class="literal">NULL</span>, <span class="number">0</span>)) &#123;          </span><br><span class="line">     <span class="keyword">if</span> (__builtin_expect (P-&gt;fd_nextsize-&gt;bk_nextsize != P, <span class="number">0</span>) || __builtin_expect (P-&gt;bk_nextsize-&gt;fd_nextsize != P, <span class="number">0</span>))    </span><br><span class="line">           malloc_printerr (check_action,<span class="string">"corrupted double-linked list (not small)"</span>,P, AV);</span><br></pre></td></tr></table></figure>
+
+<p>相关宏定义:</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> in_smallbin_range(sz)  ((unsigned long) (sz) &lt; (unsigned long) MIN_LARGE_SIZE)</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> MIN_LARGE_SIZE    ((NSMALLBINS - SMALLBIN_CORRECTION) * SMALLBIN_WIDTH)</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> NSMALLBINS         64</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> SMALLBIN_CORRECTION (MALLOC_ALIGNMENT &gt; 2 * SIZE_SZ)</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> SMALLBIN_WIDTH    MALLOC_ALIGNMENT</span></span><br></pre></td></tr></table></figure>
+
+<p>MALLOC_ALIGNMENT是堆块对齐的意思，我觉得应该是对齐的大小的意思。比如<em>8 byte alignment with 4byte size_t</em></p>
+<p>fd_nextsize和bk_nextsize这两个指针是用来链接同一个bin链表下，不同大小的chunk块，是为了加快寻找合适堆块的速度，出现在large bin中，所以如果是smallbin的话，这个值应该是0。</p>
+<p>这个检查意思是如果P不属于smallbin(64位下大于等于1024字节)，那么就要进行检查，否则没有接下来的操作了。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">P-&gt;fd_nextsize-&gt;bk_nextsize != P, <span class="number">0</span>) || __builtin_expect (P-&gt;bk_nextsize-&gt;fd_nextsize != P, <span class="number">0</span>)</span><br></pre></td></tr></table></figure>
+
+<p>意思是在对于large bin的unlink，多检查了个d_next_size,bk_next_size。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://yoursite.com/2019/09/15/heap_check/" data-id="ck0klupum0000p0yumugu470e" class="article-share-link">Share</a>
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-heap_notes" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/09/15/heap_notes/" class="article-date">
+  <time datetime="2019-09-15T06:33:46.191Z" itemprop="datePublished">2019-09-15</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2019/09/15/heap_notes/">Heap</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="堆得基本知识"><a href="#堆得基本知识" class="headerlink" title="堆得基本知识"></a>堆得基本知识</h2><h5 id="bin"><a href="#bin" class="headerlink" title="bin"></a>bin</h5><ol>
+<li>第一个为 unsorted bin</li>
+<li>索引从 2 到 63 的 bin 称为 small bin</li>
+<li>small bins 后面的 bin 被称作 large bins。large bins 中的每一个 bin 都包含一定范围内的 chunk，其中的 chunk 按 fd 指针的顺序从大到小排列。相同大小的 chunk 同样按照最近使用顺序排列。</li>
+</ol>
+<p>上述这些 bin 的排布都会遵循一个原则：<strong>任意两个物理相邻的空闲 chunk 不能在一起</strong>。</p>
+<h5 id="fastbin-不属于bin的索引内，属于单独的容器，目的是为了提高分配的速度"><a href="#fastbin-不属于bin的索引内，属于单独的容器，目的是为了提高分配的速度" class="headerlink" title="fastbin(不属于bin的索引内，属于单独的容器，目的是为了提高分配的速度)"></a>fastbin(不属于bin的索引内，属于单独的容器，目的是为了提高分配的速度)</h5><p>每个bin采用LIFO策略</p>
+<p>32位最大数据空间为64字节</p>
+<p>free一个fastbin时不会将pre_inuse位置0，fastbin不会触发unlink</p>
+<p>free时，会检查nextchunk的size</p>
+<p>free时检查bin中的第一个chunk是不是跟这个相同(double free)。</p>
+<p>取出的fastbin必须与bin对应的size对应。</p>
+<p>1.如果不是fastbin，释放时如果与top chunk相连，则会与top chunk进行合并</p>
+<h5 id="small-bin"><a href="#small-bin" class="headerlink" title="small bin"></a>small bin</h5><p>每个bin采用FIFO的规则。</p>
+<p>chunk大小与所在bin的关系为 2 * size_sz * index,index从2到63</p>
+<p>32位大小从16字节到504字节</p>
+<table>
+<thead>
+<tr>
+<th align="left">下标</th>
+<th align="left">SIZE_SZ=4（32 位）</th>
+<th align="left">SIZE_SZ=8（64 位）</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left">2</td>
+<td align="left">16</td>
+<td align="left">32</td>
+</tr>
+<tr>
+<td align="left">3</td>
+<td align="left">24</td>
+<td align="left">48</td>
+</tr>
+<tr>
+<td align="left">4</td>
+<td align="left">32</td>
+<td align="left">64</td>
+</tr>
+<tr>
+<td align="left">5</td>
+<td align="left">40</td>
+<td align="left">80</td>
+</tr>
+<tr>
+<td align="left">x</td>
+<td align="left">2<em>4</em>x</td>
+<td align="left">2<em>8</em>x</td>
+</tr>
+<tr>
+<td align="left">63</td>
+<td align="left">504</td>
+<td align="left">1008</td>
+</tr>
+</tbody></table>
+<h5 id="Large-bin"><a href="#Large-bin" class="headerlink" title="Large bin"></a>Large bin</h5><p>一共包括63个bin，每个bin中的chunk的大小不一致，而是处于一定范围内，每组bin的chunk大小之间的公差一致。</p>
+<table>
+<thead>
+<tr>
+<th align="left">组</th>
+<th align="left">数量</th>
+<th align="left">公差</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left">1</td>
+<td align="left">32</td>
+<td align="left">64B</td>
+</tr>
+<tr>
+<td align="left">2</td>
+<td align="left">16</td>
+<td align="left">512B</td>
+</tr>
+<tr>
+<td align="left">3</td>
+<td align="left">8</td>
+<td align="left">4096B</td>
+</tr>
+<tr>
+<td align="left">4</td>
+<td align="left">4</td>
+<td align="left">32768B</td>
+</tr>
+<tr>
+<td align="left">5</td>
+<td align="left">2</td>
+<td align="left">262144B</td>
+</tr>
+<tr>
+<td align="left">6</td>
+<td align="left">1</td>
+<td align="left">不限制</td>
+</tr>
+</tbody></table>
+<h5 id="Unsorted-bin"><a href="#Unsorted-bin" class="headerlink" title="Unsorted bin"></a>Unsorted bin</h5><p>处于bin下标1处，只有一个链表，其中的空闲chunk处于乱序状态，有2个来源：</p>
+<ul>
+<li>当一个较大的 chunk 被分割成两半后，如果剩下的部分大于 MINSIZE，就会被放到 unsorted bin 中。</li>
+<li>释放一个不属于 fast bin 的 chunk，并且该 chunk 不和 top chunk 紧邻时，该 chunk 会被首先放到 unsorted bin 中。</li>
+</ul>
+<p>遍历顺序是FIFO</p>
+<h1 id="堆漏洞"><a href="#堆漏洞" class="headerlink" title="堆漏洞"></a>堆漏洞</h1><h2 id="Off-By-One"><a href="#Off-By-One" class="headerlink" title="Off-By-One"></a>Off-By-One</h2><p>这是种特殊漏洞，由边界验证不严造成。</p>
+<h6 id="原理"><a href="#原理" class="headerlink" title="原理"></a>原理</h6><p>循环语句的循环次数设置错误，导致多写入了一个字节。</p>
+<h6 id="利用思路"><a href="#利用思路" class="headerlink" title="利用思路"></a>利用思路</h6><ol>
+<li>溢出字节为可控制任意字节：通过修改大小造成块结构之间出现重叠，从而泄露其他块数据，或是覆盖其他块数据。也可使用 NULL 字节溢出的方法</li>
+<li>溢出字节为 NULL 字节：在 size 为 0x100 的时候，溢出 NULL 字节可以使得 <code>prev_in_use</code>位被清，这样前块会被认为是 free 块。（1） 这时可以选择使用 unlink 方法（见 unlink 部分）进行处理。（2） 另外，这时 <code>prev_size</code> 域就会启用，就可以伪造 <code>prev_size</code> ，从而造成块之间发生重叠。此方法的关键在于 unlink 的时候没有检查按照 <code>prev_size</code> 找到的块的后一块（理论上是当前正在 unlink 的块）与当前正在 unlink 的块大小是否相等。</li>
+</ol>
+<h2 id="Chunk-Extend-and-Overlapping"><a href="#Chunk-Extend-and-Overlapping" class="headerlink" title="Chunk Extend and Overlapping"></a>Chunk Extend and Overlapping</h2><h6 id="利用条件："><a href="#利用条件：" class="headerlink" title="利用条件："></a>利用条件：</h6><p>1.存在基于堆的漏洞。</p>
+<p>2.漏洞可以控制chunk header 中的数据。</p>
+<h6 id="原理："><a href="#原理：" class="headerlink" title="原理："></a>原理：</h6><p>ptmalloc通过chunk header的数据判断chunk的使用情况和对chunk的前后块进行定位。</p>
+<p>所以我们可以通过控制size和pre_size域来实现跨越块操作从而导致overlapping。</p>
+<p>比如：将chunk1的size改大，能够覆盖到chunk2，就可以通过chunk1控制chunk2中的内容了。</p>
+<h6 id="Chunk-Extend的作用："><a href="#Chunk-Extend的作用：" class="headerlink" title="Chunk Extend的作用："></a>Chunk Extend的作用：</h6><p>可以控制chunk中的内容，通过chunk中的字符串指针，函数指针(如果这些函数存在的话)来进行信息泄露</p>
+<p>和控制执行流程。此外，还可以通过extend实现chunk overlapping/，控制chunk的fd和bk指针从而实现fastbin attack等利用。</p>
+<h2 id="Unlink"><a href="#Unlink" class="headerlink" title="Unlink"></a>Unlink</h2><p>unlink 用来将一个双向链表（只存储空闲的 chunk）中的一个元素取出来，可能在以下地方使用</p>
+<ul>
+<li>malloc<ul>
+<li>从恰好大小合适的 large bin 中获取 chunk。</li>
+<li><strong>这里需要注意的是 fastbin 与 small bin 就没有使用 unlink，这就是为什么漏洞会经常出现在它们这里的原因。</strong></li>
+<li>依次遍历处理 unsorted bin 时也没有使用 unlink 的。</li>
+<li>从比请求的 chunk 所在的 bin 大的 bin 中取 chunk。</li>
+</ul>
+</li>
+<li>Free<ul>
+<li>后向合并，合并物理相邻低地址空闲 chunk。</li>
+<li>前向合并，合并物理相邻高地址空闲 chunk（除了 top chunk）。</li>
+</ul>
+</li>
+<li>malloc_consolidate<ul>
+<li>后向合并，合并物理相邻低地址空闲 chunk。</li>
+<li>前向合并，合并物理相邻高地址空闲 chunk（除了 top chunk）。</li>
+</ul>
+</li>
+<li>realloc<ul>
+<li>前向扩展，合并物理相邻高地址空闲 chunk（除了 top chunk）。</li>
+</ul>
+</li>
+</ul>
+<h6 id="具体操作"><a href="#具体操作" class="headerlink" title="具体操作"></a>具体操作</h6><p>1.向后合并:    判断当前chunk的pre_inuse，如果为0，则size += presize,并修改当前chunk的指针指向前一个chunk，这里的前一个chunk指的是物理低地址的chunk。最后使用unlink宏，将前一个 free chunk从双向循环链表种移除。</p>
+<p>2.向前合并：判断next chunk的next chunk 的prev_inuse位，其他与向后合并类似。(glibc查找next chunk的inuse位通过查找nextchunk + nextsize得到的指针的prev_inuse)</p>
+<p>Large bin还会增加一个对nextsize的处理。</p>
+<p>3.合并完成后，将合并后的chunk放到unsorted bin中</p>
+<h2 id="unlink讲的不错的网址-https-www-cnblogs-com-alisecurity-p-5563819-html"><a href="#unlink讲的不错的网址-https-www-cnblogs-com-alisecurity-p-5563819-html" class="headerlink" title="unlink讲的不错的网址:https://www.cnblogs.com/alisecurity/p/5563819.html"></a>unlink讲的不错的网址:<a href="https://www.cnblogs.com/alisecurity/p/5563819.html" target="_blank" rel="noopener">https://www.cnblogs.com/alisecurity/p/5563819.html</a></h2><p>unlink可以借助堆溢出讲目标地址的值改为你希望的函数地址。</p>
+<p>由于现在unlink添加了检查机制：(32位的情况下)</p>
+<p>我们可以通过fakeBK和fakeFD来伪造，让fakeFD+12和fakeBK</p>
+<p>+8指向同一个P，通过此方式，P指针将会指向比自己低12的地址。</p>
+<h6 id="unlink漏洞一般在堆溢出时比较好利用"><a href="#unlink漏洞一般在堆溢出时比较好利用" class="headerlink" title="unlink漏洞一般在堆溢出时比较好利用"></a>unlink漏洞一般在堆溢出时比较好利用</h6><p>注:笔记还应增加补齐,补完整.</p>
+<h2 id="Use-After-Free"><a href="#Use-After-Free" class="headerlink" title="Use After Free"></a>Use After Free</h2><p>原理：</p>
+<p>已经释放的指针没有置为NULL,导致还可以在被利用。</p>
+<p>例如: 程序中ptr指针原来指向一个堆块，但ptr指针没有被置为NULL,我们可以通过重新释放开辟来修改这个堆块中的内容，但是ptr指针仍然指向这个堆块，这时在调用ptr指针能产生一些神奇的效果。</p>
+<h2 id="Fastbin-Attack"><a href="#Fastbin-Attack" class="headerlink" title="Fastbin Attack"></a>Fastbin Attack</h2><p>这是一类漏洞的利用方法，利用前提是:</p>
+<ul>
+<li>存在堆溢出、use-after-free 等能控制 chunk 内容的漏洞</li>
+<li>漏洞发生于 fastbin 类型的 chunk 中</li>
+</ul>
+<p>如果细分的话，可以做如下分类:</p>
+<ul>
+<li>Fastbin Double Free</li>
+<li>House of Spirit</li>
+<li>Alloc to Stack</li>
+<li>Arbitrary Alloc</li>
+</ul>
+<p>其中，前两种主要漏洞侧重于利用 <code>free</code> 函数释放<strong>真的 chunk 或伪造的 chunk</strong>，然后再次申请 chunk 进行攻击，后两种侧重于故意修改 <code>fd</code> 指针，直接利用 <code>malloc</code> 申请指定位置 chunk 进行攻击。</p>
+<h6 id="原理：-1"><a href="#原理：-1" class="headerlink" title="原理："></a>原理：</h6><p>fastbin是用单链表来维护释放的堆块，并且释放的chunk的next_chunk的prev_inuse位不会被清空。</p>
+<h4 id="Fastbin-Double-Free"><a href="#Fastbin-Double-Free" class="headerlink" title="Fastbin Double Free"></a>Fastbin Double Free</h4><p>介绍：对同一个堆块执行了两次free。</p>
+<p>原因：1.next_chunk的pre_inuse位不会被清空</p>
+<p>​         2.fastbin在执行free的时候仅验证了main_arena直接指向的块，即链表指针头部的块，对链表后面的块并没有进行验证。</p>
+<p>利用：double free后，多个指针指向同一个chunk，篡改被double free的chunk的fd指针(或者其他关键的数据域)，使下次分配chunk使能分配到自己安排的地址，比如bss段某位置。需要注意的是，自己安排的地址的size域必须设置好，因为_int_malloc会对欲分配位置的size域进行验证。如果其size与当前fastbin链表应有size不符，就会抛出异常。</p>
+<h4 id="House-Of-Spirit"><a href="#House-Of-Spirit" class="headerlink" title="House Of Spirit"></a>House Of Spirit</h4><p>核心在于在目标位置伪造一个fastbin chunk，然后将其释放，从而达到分配指定位置的效果。</p>
+<h6 id="需要绕过的检测"><a href="#需要绕过的检测" class="headerlink" title="需要绕过的检测"></a>需要绕过的检测</h6><ul>
+<li>fake chunk 的 ISMMAP 位不能为 1，因为 free 时，如果是 mmap 的 chunk，会单独处理。</li>
+<li>fake chunk 地址需要对齐， MALLOC_ALIGN_MASK</li>
+<li>fake chunk 的 size 大小需要满足对应的 fastbin 的需求，同时也得对齐。</li>
+<li>fake chunk 的 next chunk 的大小不能小于 <code>2 * SIZE_SZ</code>，同时也不能大于<code>av-&gt;system_mem</code>。</li>
+<li>fake chunk 对应的 fastbin 链表头部不能是该 fake chunk，即不能构成 double free 的情况。</li>
+</ul>
+<h6 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h6><p>想要使用该技术分配 chunk 到指定地址，其实并不需要修改指定地址的任何内容，<strong>关键是要能够修改指定地址的前后的内容使其可以绕过对应的检测</strong>。</p>
+<h4 id="Alloc-To-Stack"><a href="#Alloc-To-Stack" class="headerlink" title="Alloc To Stack"></a>Alloc To Stack</h4><p>该技术的核心点在于劫持 fastbin 链表中 chunk 的 fd 指针，把 fd 指针指向我们想要分配的栈上，从而实现控制栈中的一些关键数据，比如返回地址等。</p>
+<h4 id="Arbitrary-Alloc"><a href="#Arbitrary-Alloc" class="headerlink" title="Arbitrary Alloc"></a>Arbitrary Alloc</h4><p>与acloc to stack一模一样，只是位置可以不在stack，而在bss、heap、data、stack等。</p>
+<h2 id="Unsorted-Bin-Attack"><a href="#Unsorted-Bin-Attack" class="headerlink" title="Unsorted Bin Attack"></a>Unsorted Bin Attack</h2><p>Unsorted chunk在被free时，会检查next chunk’s pre inuse和next next chunk’s pre inuse.</p>
+<p>原理：每次取出bin-&gt;bk，会将bck(bin-&gt;bk-&gt;bk)-fd的位置写入unsorted bin的位置。</p>
+<p>被利用的前提：控制 unsorted bin chunk 的bk指针,使其为target_addr-16</p>
+<p>可以达到的效果：修改target_addr为一个较大的数值(bin的地址，如0x7fxxxxxxxx)，不受 fd指针的值影响。由源码得，不是将fd的值放入bck-fd的位置，而是直接将bin的地址放入。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* remove from unsorted list */</span></span><br><span class="line"><span class="keyword">if</span> (__glibc_unlikely (bck-&gt;fd != victim))</span><br><span class="line">  malloc_printerr (<span class="string">"malloc(): corrupted unsorted chunks 3"</span>);</span><br><span class="line">unsorted_chunks (av)-&gt;bk = bck;</span><br><span class="line">bck-&gt;fd = unsorted_chunks (av);</span><br></pre></td></tr></table></figure>
+
+<h2 id="Large-Bin-Attack"><a href="#Large-Bin-Attack" class="headerlink" title="Large Bin Attack"></a>Large Bin Attack</h2><p>可以用来修改任意地址的值</p>
+<h2 id="Tcache"><a href="#Tcache" class="headerlink" title="Tcache"></a>Tcache</h2><p>libc2.26之后引进的新机制。</p>
+<p>新增了2个结构体,分别是 tcache_entry 和 tcache_pertheread_struct.</p>
+<p>一个 tcache bin 中的最大块数<code>mp_.tcache_count</code>是<code>7</code>。</p>
+<p>tcache中少了许多检查，所以修改next指针，double free很容易实现。</p>
+<h1 id="house系列"><a href="#house系列" class="headerlink" title="house系列"></a>house系列</h1><h3 id="house-of-Einherjar"><a href="#house-of-Einherjar" class="headerlink" title="house of Einherjar"></a>house of Einherjar</h3><p>原理：前一个chunk与后一个chunk共享prev_size字段，并且能控制后一个chunk 的prev_inuse字段，以此达到unlink使新chunk指向几乎任何位置。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://yoursite.com/2019/09/15/heap_notes/" data-id="ck0klupv40005p0yuq6ysjdqi" class="article-share-link">Share</a>
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-io_file" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/09/15/io_file/" class="article-date">
+  <time datetime="2019-09-15T06:31:20.961Z" itemprop="datePublished">2019-09-15</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2019/09/15/io_file/">IO_file</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="FILE-介绍"><a href="#FILE-介绍" class="headerlink" title="FILE 介绍"></a>FILE 介绍</h2><p>FILE 在 Linux 系统的标准 IO 库中是用于描述文件的结构，称为文件流。 FILE 结构在程序执行 fopen 等函数时会进行创建，并分配在堆中。我们常定义一个指向 FILE 结构的指针来接收这个返回值。</p>
+<p>在标准I/O库中，每个程序启动时有三个文件流自动打开: stdin、stdout、stderr。在初始状态下，_IO_list_all 指向了一个由这些文件流构成的链表。这三个文件流位于libc.so的数据段，而我们使用fopen创建的位于堆内存上。</p>
+<p><em>IO_FILE结构外包裹着另一种结构，</em> _IO_FILE_plus,其中包含了一个重要指针vtable，指向一系列函数指针。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">void * funcs[] = &#123;</span><br><span class="line">   1 NULL, // &quot;extra word&quot;</span><br><span class="line">   2 NULL, // DUMMY</span><br><span class="line">   3 exit, // finish</span><br><span class="line">   4 NULL, // overflow</span><br><span class="line">   5 NULL, // underflow</span><br><span class="line">   6 NULL, // uflow</span><br><span class="line">   7 NULL, // pbackfail</span><br><span class="line">   </span><br><span class="line">   8 NULL, // xsputn  #printf</span><br><span class="line">   9 NULL, // xsgetn</span><br><span class="line">   10 NULL, // seekoff</span><br><span class="line">   11 NULL, // seekpos</span><br><span class="line">   12 NULL, // setbuf</span><br><span class="line">   13 NULL, // sync</span><br><span class="line">   14 NULL, // doallocate</span><br><span class="line">   15 NULL, // read</span><br><span class="line">   16 NULL, // write</span><br><span class="line">   17 NULL, // seek</span><br><span class="line">   18 pwn,  // close</span><br><span class="line">   19 NULL, // stat</span><br><span class="line">   20 NULL, // showmanyc</span><br><span class="line">   21 NULL, // imbue</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>在 libc2.23 版本下，32 位的 vtable 相对于_IO_FILE偏移为 0x94，64 位偏移为 0xd8</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">struct _IO_FILE_plus</span><br><span class="line">&#123;</span><br><span class="line">    _IO_FILE    file;</span><br><span class="line">    IO_jump_t   *vtable;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="fopen"><a href="#fopen" class="headerlink" title="fopen"></a>fopen</h2><p>当使用fopen时，对应的函数__fopen_internal内部调用malloc，分配FILE结构空间。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">*new_f = (struct locked_FILE *) malloc (sizeof (struct locked_FILE));</span><br></pre></td></tr></table></figure>
+
+<p>在_IO_file_init 函数的初始化操作中，会调用_IO_link_in 把新分配的 FILE 链入_IO_list_all 为起始的 FILE 链表中。</p>
+<p>之后__fopen_internal 函数会调用_IO_file_fopen 函数打开目标文件，_IO_file_fopen 会根据用户传入的打开模式进行打开操作，最后会调用到系统接口 open 函数。</p>
+<p>总结一下 fopen 的操作是</p>
+<ul>
+<li>使用 malloc 分配 FILE 结构</li>
+<li>设置 FILE 结构的 vtable</li>
+<li>初始化分配的 FILE 结构</li>
+<li>将初始化的 FILE 结构链入 FILE 结构链表中</li>
+<li>调用系统调用打开文件</li>
+</ul>
+<h2 id="printf-puts"><a href="#printf-puts" class="headerlink" title="printf/puts"></a>printf/puts</h2><p>printf 和 puts 是常用的输出函数，在 printf 的参数是以’\n’结束的纯字符串时，printf 会被优化为 puts 函数并去除换行符。</p>
+<p>puts 在源码中实现的函数是_IO_puts，这个函数的操作与 fwrite 的流程大致相同，函数内部同样会调用 vtable 中的_IO_sputn，结果会执行_IO_new_file_xsputn，最后会调用到系统接口 write 函数。</p>
+<h1 id="伪造vtable劫持程序流程"><a href="#伪造vtable劫持程序流程" class="headerlink" title="伪造vtable劫持程序流程"></a>伪造vtable劫持程序流程</h1><p>两种方法：</p>
+<p>第一种：改写vtable中的函数指针，使其指向其他函数。</p>
+<p>第二种：使vtable指向我们控制的内存，伪造vtable，自己布置函数指针。</p>
+<p>需要注意：可以修改vtable指向的地址，但不能修改vtable中函数的地址。</p>
+<h2 id="FSOP"><a href="#FSOP" class="headerlink" title="FSOP"></a>FSOP</h2><p>File Stream Oriented Programming.</p>
+<p>FSOP 的核心思想就是劫持_IO_list_all 的值来伪造链表和其中的_IO_FILE 项，但是单纯的伪造只是构造了数据还需要某种方法进行触发。FSOP 选择的触发方法是调用_IO_flush_all_lockp，这个函数会刷新_IO_list_all 链表中所有项的文件流，相当于对每个 FILE 调用 fflush，也对应着会调用_IO_FILE_plus.vtable 中的 _IO_overflow。</p>
+<p>而_IO_flush_all_lockp 不需要攻击者手动调用，在一些情况下这个函数会被系统调用：</p>
+<p>\1. 当 libc 执行 abort 流程时</p>
+<p>\2. 当执行 exit 函数时</p>
+<p>\3. 当执行流从 main 函数返回时</p>
+<p>所以我们可以将IO_list_all 的值指向我们伪造的地址，vtable的值也指向伪造的地址，并且还要布置数据，是构造的 fake_file 能正常工作</p>
+<ul>
+<li>fp-&gt;_mode &lt;= 0</li>
+<li>fp-&gt;_IO_write_ptr &gt; fp-&gt;_IO_write_base</li>
+</ul>
+<p>需要提前获得这些变量的offset</p>
+<p>(上述利用情况为glibc 2.24以前)</p>
+<h2 id="Exploit-in-libc2-24"><a href="#Exploit-in-libc2-24" class="headerlink" title="Exploit in libc2.24"></a>Exploit in libc2.24</h2><p>在2.24中，添加了许多对vtable的检查，所以利用vtable变得十分困难，所以我们选择利用_IO_FILE 这个结构体。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">struct</span> _<span class="title">IO_FILE</span> &#123;</span></span><br><span class="line">  <span class="keyword">int</span> _flags;       <span class="comment">/* High-order word is _IO_MAGIC; rest is flags. */</span></span><br><span class="line"></span><br><span class="line">  <span class="comment">/* The following pointers correspond to the C++ streambuf protocol. */</span></span><br><span class="line"></span><br><span class="line">  <span class="comment">/* Note:  Tk uses the _IO_read_ptr and _IO_read_end fields directly. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_read_ptr;   <span class="comment">/* Current read pointer */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_read_end;   <span class="comment">/* End of get area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_read_base;  <span class="comment">/* Start of putback+get area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_write_base; <span class="comment">/* Start of put area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_write_ptr;  <span class="comment">/* Current put pointer. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_write_end;  <span class="comment">/* End of put area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_buf_base;   <span class="comment">/* Start of reserve area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span>* _IO_buf_end;    <span class="comment">/* End of reserve area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="comment">/* The following fields are used to support backing up and undo. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span> *_IO_save_base; <span class="comment">/* Pointer to start of non-current get area. */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span> *_IO_backup_base;  <span class="comment">/* Pointer to first valid character of backup area */</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">char</span> *_IO_save_end; <span class="comment">/* Pointer to end of non-current get area. */</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">  <span class="class"><span class="keyword">struct</span> _<span class="title">IO_marker</span> *_<span class="title">markers</span>;</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">  <span class="class"><span class="keyword">struct</span> _<span class="title">IO_FILE</span> *_<span class="title">chain</span>;</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">  <span class="keyword">int</span> _fileno;</span><br><span class="line"></span><br><span class="line">  <span class="keyword">int</span> _flags2;</span><br><span class="line"></span><br><span class="line">  _IO_off_t _old_offset; <span class="comment">/* This used to be _offset but it's too small.  */</span></span><br><span class="line"></span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<h4 id="Modify"><a href="#Modify" class="headerlink" title="Modify"></a>Modify</h4><p>For example, if we modify stdin’s _IO_buf_base and _IO_buf_end, so when the program use scanf or printf, the content will be read in the address we have modified.</p>
+<h3 id="IO-str-jumps"><a href="#IO-str-jumps" class="headerlink" title="_IO_str_jumps"></a>_IO_str_jumps</h3><p>搞不懂暂时。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://yoursite.com/2019/09/15/io_file/" data-id="ck0klupus0002p0yudnu1c41n" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/io-file/">io_file</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-hello-world" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2019/07/07/hello-world/" class="article-date">
@@ -101,7 +488,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://yoursite.com/2019/07/07/hello-world/" data-id="cjxskj6gi0000zuqzpi6nr9xc" class="article-share-link">Share</a>
+      <a data-url="http://yoursite.com/2019/07/07/hello-world/" data-id="ck0klupuq0001p0yu698svkeh" class="article-share-link">Share</a>
       
       
     </footer>
@@ -121,15 +508,29 @@
 
   
     
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/io-file/">io_file</a></li></ul>
+    </div>
+  </div>
+
 
   
     
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/io-file/" style="font-size: 10px;">io_file</a>
+    </div>
+  </div>
+
   
     
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/09/">September 2019</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a></li></ul>
     </div>
   </div>
 
@@ -140,6 +541,18 @@
     <h3 class="widget-title">Recent Posts</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2019/09/15/heap_check/">heap_check</a>
+          </li>
+        
+          <li>
+            <a href="/2019/09/15/heap_notes/">Heap</a>
+          </li>
+        
+          <li>
+            <a href="/2019/09/15/io_file/">IO_file</a>
+          </li>
         
           <li>
             <a href="/2019/07/07/hello-world/">Hello World</a>
